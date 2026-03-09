@@ -24,16 +24,22 @@ jobs:
         include:
           - runner: ubuntu-24.04
             label: linux-x64
+            coverage: true
           - runner: ubuntu-24.04-arm
             label: linux-arm64
+            coverage: true
           - runner: windows-2025
             label: windows-x64
+            coverage: true
           - runner: windows-11-arm
             label: windows-arm64
+            coverage: false
           - runner: macos-15-intel
             label: macos-intel
+            coverage: true
           - runner: macos-latest
             label: macos-arm64
+            coverage: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,6 +48,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-llvm-cov
+        if: matrix.coverage
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run fmt check
@@ -49,9 +56,15 @@ jobs:
         run: cargo fmt --check
 
       - name: Generate coverage report
+        if: matrix.coverage
         run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
 
+      - name: Run tests without coverage
+        if: ${{ !matrix.coverage }}
+        run: cargo test --locked --all-targets
+
       - name: Upload coverage reports to Codecov
+        if: matrix.coverage
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

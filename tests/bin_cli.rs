@@ -52,11 +52,7 @@ fn bin_hashes_stdin_when_dash_is_used() {
 
 #[test]
 fn bin_reports_cli_errors_from_execution() {
-    let output = tlsh_command()
-        .arg("hash")
-        .arg("-")
-        .output()
-        .unwrap();
+    let output = tlsh_command().arg("hash").arg("-").output().unwrap();
 
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
