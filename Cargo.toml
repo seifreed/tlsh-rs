@@ -1,0 +1,19 @@
+[package]
+name = "tlsh-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Pure Rust TLSH implementation with library and CLI support."
+license = "Apache-2.0 OR BSD-3-Clause"
+readme = "README.md"
+repository = "https://github.com/seifreed/tlsh-rs"
+homepage = "https://github.com/seifreed/tlsh-rs"
+documentation = "https://docs.rs/tlsh-rs"
+keywords = ["tlsh", "fuzzy-hashing", "malware", "similarity", "security"]
+categories = ["algorithms", "command-line-utilities", "parser-implementations"]
+
+[[bin]]
+name = "tlsh"
+path = "src/bin/tlsh.rs"
+
+[dependencies]
