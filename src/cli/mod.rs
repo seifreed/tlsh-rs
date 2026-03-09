@@ -11,14 +11,14 @@ pub fn run(args: Vec<String>) -> Result<String, String> {
     run_with_stdin(args, None)
 }
 
+#[allow(clippy::question_mark)]
 pub fn run_with_stdin(args: Vec<String>, stdin_bytes: Option<&[u8]>) -> Result<String, String> {
-    let command = args::parse(args)?;
-    let mut context = io::CliContext::new(stdin_bytes);
-    let output = match application::execute(command, &mut context) {
-        Ok(output) => output,
-        Err(error) => return Err(error.to_string()),
+    let command = match parse_command(args) {
+        Ok(command) => command,
+        Err(error) => return Err(error),
     };
-    Ok(presentation::render(output))
+    let mut context = io::CliContext::new(stdin_bytes);
+    execute_and_render(command, &mut context)
 }
 
 pub fn usage() -> String {
@@ -27,50 +27,105 @@ pub fn usage() -> String {
 
 pub fn run_with_io(
     args: Vec<String>,
-    stdin: &mut impl Read,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> ExitCode {
-    let stdin_buffer = match collect_stdin_if_needed(&args, stdin) {
-        Ok(buffer) => buffer,
-        Err(error) => {
-            let _ = writeln!(stderr, "failed to read stdin: {error}");
-            return ExitCode::from(1);
-        }
+    let stdin_buffer = match prepare_stdin_buffer(&args, stdin, stderr) {
+        Some(buffer) => buffer,
+        None => return ExitCode::from(1),
     };
 
-    match run_with_stdin(args, stdin_buffer.as_deref()) {
-        Ok(output) => {
-            if !output.is_empty() {
-                let _ = writeln!(stdout, "{output}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(message) => {
-            let _ = writeln!(stderr, "{message}");
-            ExitCode::from(1)
-        }
-    }
+    let result = run_with_stdin(args, stdin_buffer.as_deref());
+    write_run_result(result, stdout, stderr)
+}
+
+fn parse_command(args: Vec<String>) -> Result<model::Command, String> {
+    args::parse(args)
+}
+
+fn execute_and_render(
+    command: model::Command,
+    context: &mut io::CliContext<'_>,
+) -> Result<String, String> {
+    let output = match application::execute(command, context) {
+        Ok(output) => output,
+        Err(error) => return Err(error.to_string()),
+    };
+    Ok(presentation::render(output))
 }
 
 fn collect_stdin_if_needed(
     args: &[String],
-    stdin: &mut impl Read,
+    stdin: &mut dyn Read,
 ) -> Result<Option<Vec<u8>>, std::io::Error> {
-    let mut needs_stdin = false;
-    for arg in args {
-        if arg == "-" {
-            needs_stdin = true;
-            break;
-        }
-    }
-    if !needs_stdin {
+    if !contains_stdin_marker(args) {
         return Ok(None);
     }
 
+    read_stdin_buffer(stdin)
+}
+
+fn read_stdin_buffer(stdin: &mut dyn Read) -> Result<Option<Vec<u8>>, std::io::Error> {
     let mut buffer = Vec::new();
-    stdin.read_to_end(&mut buffer)?;
-    Ok(Some(buffer))
+    match stdin.read_to_end(&mut buffer) {
+        Ok(_) => Ok(Some(buffer)),
+        Err(error) => Err(error),
+    }
+}
+
+fn contains_stdin_marker(args: &[String]) -> bool {
+    let mut index = 0usize;
+    while index < args.len() {
+        if args[index] == "-" {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn write_stdin_error(stderr: &mut dyn Write, error: std::io::Error) -> ExitCode {
+    let _ = writeln!(stderr, "failed to read stdin: {error}");
+    ExitCode::from(1)
+}
+
+fn prepare_stdin_buffer(
+    args: &[String],
+    stdin: &mut dyn Read,
+    stderr: &mut dyn Write,
+) -> Option<Option<Vec<u8>>> {
+    match collect_stdin_if_needed(args, stdin) {
+        Ok(buffer) => Some(buffer),
+        Err(error) => {
+            let _ = write_stdin_error(stderr, error);
+            None
+        }
+    }
+}
+
+fn write_run_result(
+    result: Result<String, String>,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> ExitCode {
+    match result {
+        Ok(output) => write_success_output(stdout, output),
+        Err(message) => write_cli_error(stderr, &message),
+    }
+}
+
+fn write_success_output(stdout: &mut dyn Write, output: String) -> ExitCode {
+    if output.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    let _ = writeln!(stdout, "{output}");
+    ExitCode::SUCCESS
+}
+
+fn write_cli_error(stderr: &mut dyn Write, message: &str) -> ExitCode {
+    let _ = writeln!(stderr, "{message}");
+    ExitCode::from(1)
 }
 
 #[cfg(test)]
@@ -112,6 +167,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_command_delegates_to_argument_parser() {
+        let command = parse_command(vec!["hash".to_string(), fixture("small.txt")]).unwrap();
+        let expected = args::parse(vec!["hash".to_string(), fixture("small.txt")]).unwrap();
+        assert_eq!(command, expected);
+    }
+
+    #[test]
     fn run_surfaces_execution_errors() {
         let error = run(vec!["hash".to_string(), "-".to_string()]).unwrap_err();
         assert!(error.contains("stdin was requested"));
@@ -132,6 +194,68 @@ mod tests {
         let buffer =
             collect_stdin_if_needed(&["hash".to_string(), "-".to_string()], &mut stdin).unwrap();
         assert_eq!(buffer, Some(b"stdin".to_vec()));
+    }
+
+    #[test]
+    fn read_and_prepare_stdin_buffer_cover_success_and_error_paths() {
+        let mut stdin = Cursor::new(b"stdin".to_vec());
+        assert_eq!(
+            read_stdin_buffer(&mut stdin).unwrap(),
+            Some(b"stdin".to_vec())
+        );
+
+        let mut stdin = Cursor::new(b"stdin".to_vec());
+        let mut stderr = Vec::new();
+        let prepared = prepare_stdin_buffer(
+            &["hash".to_string(), "-".to_string()],
+            &mut stdin,
+            &mut stderr,
+        );
+        assert_eq!(prepared, Some(Some(b"stdin".to_vec())));
+        assert!(stderr.is_empty());
+
+        let mut stdin = FailingReader;
+        let mut stderr = Vec::new();
+        let prepared = prepare_stdin_buffer(
+            &["hash".to_string(), "-".to_string()],
+            &mut stdin,
+            &mut stderr,
+        );
+        assert_eq!(prepared, None);
+        assert!(
+            String::from_utf8(stderr)
+                .unwrap()
+                .contains("failed to read stdin")
+        );
+    }
+
+    #[test]
+    fn contains_stdin_marker_detects_only_dash_arguments() {
+        assert!(!contains_stdin_marker(&[
+            "hash".to_string(),
+            "file.bin".to_string()
+        ]));
+        assert!(contains_stdin_marker(&[
+            "hash".to_string(),
+            "-".to_string(),
+            "file.bin".to_string()
+        ]));
+    }
+
+    #[test]
+    fn execute_and_render_returns_rendered_output() {
+        let command = args::parse(vec!["hash".to_string(), fixture("small.txt")]).unwrap();
+        let mut context = io::CliContext::new(None);
+        let output = execute_and_render(command, &mut context).unwrap();
+        assert!(output.starts_with("T1F8A0220"));
+    }
+
+    #[test]
+    fn execute_and_render_stringifies_application_errors() {
+        let command = args::parse(vec!["hash".to_string(), "-".to_string()]).unwrap();
+        let mut context = io::CliContext::new(None);
+        let error = execute_and_render(command, &mut context).unwrap_err();
+        assert!(error.contains("stdin was requested"));
     }
 
     #[test]
@@ -188,6 +312,37 @@ mod tests {
                 .unwrap()
                 .contains("failed to read stdin")
         );
+    }
+
+    #[test]
+    fn write_helpers_cover_success_and_error_paths() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        assert_eq!(
+            write_run_result(Ok("hello".to_string()), &mut stdout, &mut stderr),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(String::from_utf8(stdout).unwrap(), "hello\n");
+        assert!(stderr.is_empty());
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        assert_eq!(
+            write_run_result(Ok(String::new()), &mut stdout, &mut stderr),
+            ExitCode::SUCCESS
+        );
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        assert_eq!(
+            write_run_result(Err("boom".to_string()), &mut stdout, &mut stderr),
+            ExitCode::from(1)
+        );
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8(stderr).unwrap(), "boom\n");
     }
 
     #[test]

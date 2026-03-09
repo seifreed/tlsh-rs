@@ -58,22 +58,24 @@ impl TlshBuilder {
         let mut j_3 = (j + rng_size - 3) % rng_size;
         let mut j_4 = (j + rng_size - 4) % rng_size;
         let mut fed_len = self.data_len;
-
-        for &byte in data {
-            self.slide_window[j] = byte;
-
-            if fed_len >= 4 {
-                self.update_checksum(j, j_1);
-                self.update_buckets(j, j_1, j_2, j_3, j_4);
-            }
-
-            let j_tmp = j_4;
-            j_4 = j_3;
-            j_3 = j_2;
-            j_2 = j_1;
-            j_1 = j;
-            j = j_tmp;
+        let mut index = 0usize;
+        let warmup_remaining = 4usize.saturating_sub(fed_len as usize);
+        let warmup_limit = data.len().min(warmup_remaining);
+        while index < warmup_limit {
+            self.slide_window[j] = data[index];
+            rotate_window_indices(&mut j, &mut j_1, &mut j_2, &mut j_3, &mut j_4);
             fed_len += 1;
+            index += 1;
+        }
+
+        let data_len = data.len();
+        while index < data_len {
+            self.slide_window[j] = data[index];
+            self.update_checksum(j, j_1);
+            self.update_buckets(j, j_1, j_2, j_3, j_4);
+            rotate_window_indices(&mut j, &mut j_1, &mut j_2, &mut j_3, &mut j_4);
+            fed_len += 1;
+            index += 1;
         }
 
         self.data_len += data.len() as u64;
@@ -107,11 +109,7 @@ impl TlshBuilder {
             return false;
         }
 
-        let nonzero = self.buckets[..self.profile.effective_buckets()]
-            .iter()
-            .filter(|&&count| count > 0)
-            .count();
-
+        let nonzero = count_nonzero_buckets(&self.buckets, self.profile.effective_buckets());
         nonzero > (self.profile.effective_buckets() / 2)
     }
 
@@ -119,6 +117,7 @@ impl TlshBuilder {
         self.finalize_with_options(TlshOptions::default())
     }
 
+    #[allow(clippy::question_mark)]
     pub fn finalize_with_options(&self, options: TlshOptions) -> Result<TlshDigest, TlshError> {
         let min_length = if options.conservative {
             MIN_CONSERVATIVE_DATA_LENGTH
@@ -134,29 +133,18 @@ impl TlshBuilder {
         }
 
         let effective = &self.buckets[..self.profile.effective_buckets()];
-        let nonzero = effective.iter().filter(|&&count| count > 0).count();
+        let nonzero = count_nonzero_buckets(effective, effective.len());
         if nonzero <= self.profile.effective_buckets() / 2 {
             return Err(TlshError::InsufficientVariance);
         }
 
         let (q1, q2, q3) = find_quartiles(effective);
 
-        let mut code = vec![0u8; self.profile.code_size()];
-        for (idx, chunk) in effective.chunks_exact(4).enumerate() {
-            let mut value = 0u8;
-            for (offset, bucket) in chunk.iter().copied().enumerate() {
-                if q3 < bucket {
-                    value += 3 << (offset * 2);
-                } else if q2 < bucket {
-                    value += 2 << (offset * 2);
-                } else if q1 < bucket {
-                    value += 1 << (offset * 2);
-                }
-            }
-            code[idx] = value;
-        }
-
-        let lvalue = capture_length(self.data_len)?;
+        let code = build_code(effective, self.profile.code_size(), q1, q2, q3);
+        let lvalue = match capture_length(self.data_len) {
+            Ok(lvalue) => lvalue,
+            Err(error) => return Err(error),
+        };
         let q1_ratio = (((q1 as u64) * 100) / (q3 as u64) % 16) as u8;
         let q2_ratio = (((q2 as u64) * 100) / (q3 as u64) % 16) as u8;
 
@@ -221,6 +209,67 @@ fn b_mapping(i: u8, j: u8, k: u8, salt: u8) -> u8 {
     h = PEARSON_TABLE[(h ^ i) as usize];
     h = PEARSON_TABLE[(h ^ j) as usize];
     PEARSON_TABLE[(h ^ k) as usize]
+}
+
+fn rotate_window_indices(
+    j: &mut usize,
+    j_1: &mut usize,
+    j_2: &mut usize,
+    j_3: &mut usize,
+    j_4: &mut usize,
+) {
+    let j_tmp = *j_4;
+    *j_4 = *j_3;
+    *j_3 = *j_2;
+    *j_2 = *j_1;
+    *j_1 = *j;
+    *j = j_tmp;
+}
+
+fn count_nonzero_buckets(buckets: &[u32], effective_buckets: usize) -> usize {
+    let mut nonzero = 0usize;
+    let mut index = 0usize;
+    while index < effective_buckets {
+        if buckets[index] > 0 {
+            nonzero += 1;
+        }
+        index += 1;
+    }
+    nonzero
+}
+
+fn build_code(effective: &[u32], code_size: usize, q1: u32, q2: u32, q3: u32) -> Vec<u8> {
+    let mut code = vec![0u8; code_size];
+    let mut code_index = 0usize;
+    let mut bucket_index = 0usize;
+
+    while code_index < code_size {
+        let mut value = 0u8;
+        let mut offset = 0usize;
+        while offset < 4 {
+            let bucket = effective[bucket_index + offset];
+            value |= encode_bucket(bucket, q1, q2, q3) << (offset * 2);
+            offset += 1;
+        }
+        code[code_index] = value;
+        code_index += 1;
+        bucket_index += 4;
+    }
+
+    code
+}
+
+fn encode_bucket(bucket: u32, q1: u32, q2: u32, q3: u32) -> u8 {
+    if q3 < bucket {
+        return 3;
+    }
+    if q2 < bucket {
+        return 2;
+    }
+    if q1 < bucket {
+        return 1;
+    }
+    0
 }
 
 fn capture_length(len: u64) -> Result<u8, TlshError> {
@@ -319,6 +368,19 @@ mod tests {
     }
 
     #[test]
+    fn hash_bytes_with_profile_reports_data_too_long_without_reading_input() {
+        // `update` checks the declared slice length before dereferencing any byte.
+        let oversized = unsafe {
+            std::slice::from_raw_parts(
+                std::ptr::NonNull::<u8>::dangling().as_ptr(),
+                (MAX_DATA_LENGTH + 1) as usize,
+            )
+        };
+        let error = hash_bytes_with_profile(oversized, TlshProfile::standard_t1()).unwrap_err();
+        assert_eq!(error, TlshError::DataTooLong);
+    }
+
+    #[test]
     fn capture_length_covers_boundary_cases() {
         assert_eq!(capture_length(0).unwrap(), 0);
         assert_eq!(capture_length(TOP_VALUE[1] as u64).unwrap(), 1);
@@ -331,6 +393,13 @@ mod tests {
     #[test]
     fn b_mapping_is_stable() {
         assert_eq!(b_mapping(1, 2, 3, 4), b_mapping(1, 2, 3, 4));
+    }
+
+    #[test]
+    fn rotate_window_indices_rotates_positions() {
+        let (mut j, mut j_1, mut j_2, mut j_3, mut j_4) = (0usize, 4usize, 3usize, 2usize, 1usize);
+        rotate_window_indices(&mut j, &mut j_1, &mut j_2, &mut j_3, &mut j_4);
+        assert_eq!((j, j_1, j_2, j_3, j_4), (1, 0, 4, 3, 2));
     }
 
     #[test]
@@ -371,9 +440,7 @@ mod tests {
         let mut builder = TlshBuilder::new();
         builder.data_len = MIN_DATA_LENGTH as u64;
         let effective = builder.profile.effective_buckets();
-        for count in builder.buckets.iter_mut().take(effective) {
-            *count = 4;
-        }
+        builder.buckets[..effective].fill(4);
         builder.buckets[0] = 1;
         builder.buckets[1] = 2;
         builder.buckets[2] = 3;
@@ -382,5 +449,25 @@ mod tests {
         builder.buckets[66..97].fill(3);
         let digest = builder.finalize().unwrap();
         assert_eq!(digest.code()[0], 0b1110_0100);
+    }
+
+    #[test]
+    fn builder_helpers_cover_nonzero_count_and_bucket_encoding() {
+        assert_eq!(count_nonzero_buckets(&[0, 1, 0, 2], 4), 2);
+        assert_eq!(encode_bucket(10, 1, 5, 9), 3);
+        assert_eq!(encode_bucket(7, 1, 5, 9), 2);
+        assert_eq!(encode_bucket(3, 1, 5, 9), 1);
+        assert_eq!(encode_bucket(1, 1, 5, 9), 0);
+        assert_eq!(build_code(&[1, 3, 7, 10], 1, 1, 5, 9), vec![0b11_10_01_00]);
+    }
+
+    #[test]
+    fn builder_finalize_covers_capture_length_error_branch() {
+        let mut builder = TlshBuilder::new();
+        let effective = builder.profile.effective_buckets();
+        builder.buckets[..effective].fill(1);
+        builder.data_len = TOP_VALUE[TOP_VALUE.len() - 1] as u64 + 1;
+
+        assert_eq!(builder.finalize().unwrap_err(), TlshError::DataTooLong);
     }
 }

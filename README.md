@@ -250,46 +250,6 @@ To the upstream maintainers: your work is genuinely useful, technically elegant,
 
 ---
 
-## CI/CD
-
-GitHub Actions builds release artifacts for:
-
-- `x86_64-unknown-linux-gnu`
-- `aarch64-unknown-linux-gnu`
-- `x86_64-pc-windows-msvc`
-- `aarch64-pc-windows-msvc`
-- `x86_64-apple-darwin`
-- `aarch64-apple-darwin`
-
-Workflows:
-
-- [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) for push/PR validation
-- [`.github/workflows/release.yml`](./.github/workflows/release.yml) for tag-driven GitHub Releases and crates.io publishing
-
-Release flow:
-
-1. Push a tag like `v0.1.0`
-2. GitHub Actions runs verification
-3. Native release binaries are built for all supported targets
-4. A GitHub Release is created or updated with packaged artifacts
-5. The crate is published to crates.io with `cargo publish --locked`
-
-To publish to crates.io, configure this repository secret:
-
-```text
-CARGO_REGISTRY_TOKEN
-```
-
-That token must be created from your crates.io account with publish permissions for `tlsh-rs`.
-
-The runner labels used are based on the current GitHub-hosted runner reference, including `ubuntu-24.04-arm`, `windows-11-arm`, `macos-15-intel`, and `macos-latest` from GitHub Docs:
-
-- https://docs.github.com/actions/reference/runners/github-hosted-runners
-
-This is an implementation detail inferred from the current GitHub-hosted runner catalog and may need adjustment if GitHub renames runner labels later.
-
----
-
 ## Contributing
 
 Contributions are welcome. If you want to improve algorithm coverage, add more upstream compatibility vectors, or refine the CLI and release flow, open an issue or a pull request.
@@ -314,13 +274,22 @@ If this crate is useful in your malware analysis, similarity matching, or triage
 
 ## License
 
-This crate is published under:
+This project is intentionally licensed in a **permissive** way so it can be used in internal tools, commercial products, research pipelines, and open source projects.
 
 ```text
 Apache-2.0 OR BSD-3-Clause
 ```
 
-That matches the licensing model exposed by the upstream TLSH project.
+Why not MIT?
+
+This repository is a Rust port built from the upstream TLSH work and keeps a license model aligned with the original project published by Trend Micro:
+
+- Upstream repository: https://github.com/trendmicro/tlsh
+- Upstream license model: `Apache-2.0 OR BSD-3-Clause`
+
+So the safe and honest choice here is to preserve that permissive licensing model instead of relabeling the port as MIT-only.
+
+In practical terms, you can use this crate freely, including in commercial software, but you should preserve the applicable license and attribution notices from the project and its upstream origin when redistributing it.
 
 ---
 

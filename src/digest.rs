@@ -79,6 +79,8 @@ impl TlshDigest {
         let mut out = String::with_capacity(self.profile.encoded_length(with_version));
         if with_version {
             out.push_str(T1_PREFIX);
+            self.write_raw_hex(&mut out);
+            return out;
         }
         self.write_raw_hex(&mut out);
         out
@@ -109,25 +111,37 @@ impl TlshDigest {
 
     pub fn from_encoded(input: &str) -> Result<Self, TlshError> {
         if let Some(raw) = input.strip_prefix(T1_PREFIX) {
-            let profile =
-                TlshProfile::from_raw_length(raw.len()).ok_or(TlshError::InvalidDigestLength {
-                    actual_length: input.len(),
-                })?;
+            let profile = match TlshProfile::from_raw_length(raw.len()) {
+                Some(profile) => profile,
+                None => {
+                    return Err(TlshError::InvalidDigestLength {
+                        actual_length: input.len(),
+                    });
+                }
+            };
             return Self::from_raw_hex_with_profile(raw, profile);
         }
 
-        let profile =
-            TlshProfile::from_raw_length(input.len()).ok_or(TlshError::InvalidDigestLength {
-                actual_length: input.len(),
-            })?;
+        let profile = match TlshProfile::from_raw_length(input.len()) {
+            Some(profile) => profile,
+            None => {
+                return Err(TlshError::InvalidDigestLength {
+                    actual_length: input.len(),
+                });
+            }
+        };
         Self::from_raw_hex_with_profile(input, profile)
     }
 
     pub fn from_raw_hex(input: &str) -> Result<Self, TlshError> {
-        let profile =
-            TlshProfile::from_raw_length(input.len()).ok_or(TlshError::InvalidDigestLength {
-                actual_length: input.len(),
-            })?;
+        let profile = match TlshProfile::from_raw_length(input.len()) {
+            Some(profile) => profile,
+            None => {
+                return Err(TlshError::InvalidDigestLength {
+                    actual_length: input.len(),
+                });
+            }
+        };
         Self::from_raw_hex_with_profile(input, profile)
     }
 
@@ -142,10 +156,13 @@ impl TlshDigest {
 
         let bytes = input.as_bytes();
         let mut offset = 0usize;
-        let mut checksum = vec![0u8; profile.checksum_length()];
-        for item in checksum.iter_mut().take(profile.checksum_length()) {
-            *item = swap_byte(parse_hex_byte(bytes, offset));
+        let checksum_length = profile.checksum_length();
+        let mut checksum = vec![0u8; checksum_length];
+        let mut checksum_index = 0usize;
+        while checksum_index < checksum_length {
+            checksum[checksum_index] = swap_byte(parse_hex_byte(bytes, offset));
             offset += 2;
+            checksum_index += 1;
         }
 
         let lvalue = swap_byte(parse_hex_byte(bytes, offset));
@@ -215,8 +232,10 @@ impl TlshDigest {
         }
         push_hex_byte(out, swap_byte(self.lvalue));
         push_hex_byte(out, (self.q1_ratio << 4) | self.q2_ratio);
-        for value in self.code.iter().rev() {
-            push_hex_byte(out, *value);
+        let mut index = self.code.len();
+        while index > 0 {
+            index -= 1;
+            push_hex_byte(out, self.code[index]);
         }
     }
 }
@@ -386,6 +405,10 @@ mod tests {
         assert_eq!(
             TlshDigest::from_encoded("T1ABC").unwrap_err(),
             TlshError::InvalidDigestLength { actual_length: 5 }
+        );
+        assert_eq!(
+            TlshDigest::from_encoded("ABC").unwrap_err(),
+            TlshError::InvalidDigestLength { actual_length: 3 }
         );
         assert_eq!(
             TlshDigest::from_raw_hex("GG").unwrap_err(),

@@ -97,13 +97,19 @@ impl TlshProfile {
     }
 
     pub fn from_cli_name(name: &str) -> Option<Self> {
-        match name {
-            "128-1" => Some(Self::standard_t1()),
-            "128-3" => Some(Self::compact_128_3()),
-            "256-1" => Some(Self::full_256_1()),
-            "256-3" => Some(Self::full_256_3()),
-            _ => None,
+        if name == "128-1" {
+            return Some(Self::standard_t1());
         }
+        if name == "128-3" {
+            return Some(Self::compact_128_3());
+        }
+        if name == "256-1" {
+            return Some(Self::full_256_1());
+        }
+        if name == "256-3" {
+            return Some(Self::full_256_3());
+        }
+        None
     }
 
     pub const fn cli_name(self) -> &'static str {
