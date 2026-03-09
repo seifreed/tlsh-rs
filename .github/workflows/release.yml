@@ -14,8 +14,24 @@ env:
 
 jobs:
   verify:
-    name: Verify crate
-    runs-on: ubuntu-24.04
+    name: Verify (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            label: linux-x64
+          - runner: ubuntu-24.04-arm
+            label: linux-arm64
+          - runner: windows-2025
+            label: windows-x64
+          - runner: windows-11-arm
+            label: windows-arm64
+          - runner: macos-15-intel
+            label: macos-intel
+          - runner: macos-latest
+            label: macos-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,13 +39,18 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Run fmt check
+        if: matrix.label == 'linux-x64'
         run: cargo fmt --check
 
-      - name: Run tests
-        run: cargo test --locked --all-targets
+      - name: Run coverage validation
+        run: cargo llvm-cov --workspace --all-targets --summary-only
 
       - name: Check package metadata
+        if: matrix.label == 'linux-x64'
         run: cargo package --locked --allow-dirty
 
   create-release:

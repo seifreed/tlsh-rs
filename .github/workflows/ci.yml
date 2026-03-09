@@ -15,9 +15,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test (Ubuntu x64)
-    runs-on: ubuntu-24.04
+  validate:
+    name: Validate (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            label: linux-x64
+          - runner: ubuntu-24.04-arm
+            label: linux-arm64
+          - runner: windows-2025
+            label: windows-x64
+          - runner: windows-11-arm
+            label: windows-arm64
+          - runner: macos-15-intel
+            label: macos-intel
+          - runner: macos-latest
+            label: macos-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,10 +45,8 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run fmt check
+        if: matrix.label == 'linux-x64'
         run: cargo fmt --check
-
-      - name: Run tests
-        run: cargo test --locked --all-targets
 
       - name: Generate coverage report
         run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
@@ -43,3 +57,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: seifreed/tlsh-rs
           files: lcov.info
+          flags: ${{ matrix.label }}
+          name: ${{ matrix.label }}
