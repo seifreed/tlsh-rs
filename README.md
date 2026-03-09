@@ -14,7 +14,7 @@
   <a href="https://github.com/seifreed/tlsh-rs/blob/main/Cargo.toml"><img src="https://img.shields.io/badge/rust-edition%202024-orange?style=flat-square&logo=rust" alt="Rust Edition"></a>
   <a href="https://github.com/seifreed/tlsh-rs/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/seifreed/tlsh-rs/ci.yml?style=flat-square&logo=github&label=CI" alt="CI Status"></a>
   <a href="https://github.com/seifreed/tlsh-rs/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/seifreed/tlsh-rs/release.yml?style=flat-square&logo=github&label=Release" alt="Release Status"></a>
-  <img src="https://img.shields.io/badge/coverage-99.88%25-brightgreen?style=flat-square" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square" alt="Coverage">
 </p>
 
 <p align="center">
@@ -214,17 +214,6 @@ tlsh diff --format sarif a.bin b.bin
 tlsh diff T1F8A0220C0F8C0023CB880800CA33E88B8F0C022AB302C2008A030300300E8A00C83AAC \
           T1C6A022A2E0008CC320C083A3E20AA888022A00000A0AB0088828022A0008A00022F22A
 ```
-
----
-
-## Verification
-
-- Validated against upstream-compatible reference vectors and local fixtures in [`./fixtures`](./fixtures)
-- Real tests without mocks
-- Current measured coverage:
-  - lines: `99.88%`
-  - functions: `100.00%`
-  - regions: `99.18%`
 
 ---
 
